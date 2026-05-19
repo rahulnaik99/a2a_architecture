@@ -1,0 +1,111 @@
+version: "3.9"
+
+services:
+
+  # ── Infrastructure ──────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Optional: OTEL collector (uncomment to enable tracing)
+  # otel-collector:
+  #   image: otel/opentelemetry-collector-contrib:latest
+  #   ports:
+  #     - "4317:4317"   # gRPC
+  #     - "4318:4318"   # HTTP
+  #   volumes:
+  #     - ./otel-config.yaml:/etc/otel-collector-config.yaml
+
+  # ── Agent Microservices ─────────────────────────────────────────────────────
+  weather-agent:
+    build: .
+    command: uvicorn services.weather.main:app --host 0.0.0.0 --port 8001
+    ports:
+      - "8001:8001"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-openai/gpt-4o-mini}
+      - SERVICE_NAME=weather-agent
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  calculator-agent:
+    build: .
+    command: uvicorn services.calculator.main:app --host 0.0.0.0 --port 8002
+    ports:
+      - "8002:8002"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SERVICE_NAME=calculator-agent
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  search-agent:
+    build: .
+    command: uvicorn services.websearch.main:app --host 0.0.0.0 --port 8003
+    ports:
+      - "8003:8003"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SERVICE_NAME=search-agent
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Orchestrator ────────────────────────────────────────────────────────────
+  orchestrator:
+    build: .
+    command: uvicorn app_ADK.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLM_MODEL=${LLM_MODEL:-openai/gpt-4o-mini}
+      - WEATHER_AGENT_URL=http://weather-agent:8001
+      - CALCULATOR_AGENT_URL=http://calculator-agent:8002
+      - SEARCH_AGENT_URL=http://search-agent:8003
+      - SERVICE_NAME=orchestrator
+      - OTEL_ENABLED=${OTEL_ENABLED:-false}
+      - OTEL_ENDPOINT=${OTEL_ENDPOINT:-http://otel-collector:4317}
+    depends_on:
+      redis:
+        condition: service_healthy
+      weather-agent:
+        condition: service_healthy
+      calculator-agent:
+        condition: service_healthy
+      search-agent:
+        condition: service_healthy
+
+volumes:
+  redis_data:

@@ -1,0 +1,26 @@
+# Web framework
+fastapi
+uvicorn[standard]
+httpx
+
+# LLM
+litellm
+openai
+
+# Agent framework
+google-adk
+
+# MCP
+mcp
+
+# Redis
+redis[asyncio]
+
+# Config
+python-dotenv
+pydantic
+
+# Observability (optional)
+opentelemetry-api
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-grpc
